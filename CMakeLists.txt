@@ -64,17 +64,34 @@ elseif(USE_SYSTEM_PROTOBUF STREQUAL "GRPC")
 
 elseif(USE_SYSTEM_PROTOBUF STREQUAL "OFF")
   file(MAKE_DIRECTORY ${CATKIN_DEVEL_PREFIX}/include)
-
+  if (CMAKE_CROSSCOMPILING)
+    set(BUILD_PROTOC OFF)
+    message(STATUS "Won't build runnables since we're cross-compiling!")
+  else()
+    set(BUILD_PROTOC ON)
+    message(STATUS "Will build runnables.")
+  endif()
   ExternalProject_Add(protobuf_src
-    URL https://github.com/google/protobuf/releases/download/v2.6.1/protobuf-2.6.1.tar.gz
+    # URL https://github.com/google/protobuf/releases/download/v2.6.1/protobuf-2.6.1.tar.gz
+    # UPDATE_COMMAND ""
+    # PATCH_COMMAND patch -p0 < ${CMAKE_SOURCE_DIR}/unused_parameter_warnings.patch &&
+    #               patch -p0 < ${CMAKE_SOURCE_DIR}/unused_parameter_warnings_wire_format.patch
+    # CONFIGURE_COMMAND cd ../protobuf_src && ./autogen.sh && ./configure --with-pic --prefix=${CATKIN_DEVEL_PREFIX}
+    # BUILD_COMMAND cd ../protobuf_src && make -j8 && cd python && python setup.py build --build-purelib build
+    # INSTALL_COMMAND cd ../protobuf_src && make install -j8 &&
+    #                 cd python && python setup.py install --root ${CATKIN_DEVEL_PREFIX} --install-lib ${CATKIN_GLOBAL_PYTHON_DESTINATION} &&
+    #                 cp build/google/__init__.py ${CATKIN_DEVEL_PREFIX}/${CATKIN_GLOBAL_PYTHON_DESTINATION}/google
+
+    # URL https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.12.4.zip  # agree with ubuntu 22.04
+    URL https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.6.1.zip   # agree with ubuntu 20.04
     UPDATE_COMMAND ""
-    PATCH_COMMAND patch -p0 < ${CMAKE_SOURCE_DIR}/unused_parameter_warnings.patch &&
-                  patch -p0 < ${CMAKE_SOURCE_DIR}/unused_parameter_warnings_wire_format.patch
-    CONFIGURE_COMMAND cd ../protobuf_src && ./autogen.sh && ./configure --with-pic --prefix=${CATKIN_DEVEL_PREFIX}
-    BUILD_COMMAND cd ../protobuf_src && make -j8 && cd python && python setup.py build --build-purelib build
-    INSTALL_COMMAND cd ../protobuf_src && make install -j8 &&
-                    cd python && python setup.py install --root ${CATKIN_DEVEL_PREFIX} --install-lib ${CATKIN_GLOBAL_PYTHON_DESTINATION} &&
-                    cp build/google/__init__.py ${CATKIN_DEVEL_PREFIX}/${CATKIN_GLOBAL_PYTHON_DESTINATION}/google
+    CONFIGURE_COMMAND cd ../protobuf_src && pwd && 
+                      cmake -DCMAKE_INSTALL_PREFIX=${CATKIN_DEVEL_PREFIX}
+                      -DCMAKE_TOOLCHAIN_FILE:STRING=${CMAKE_TOOLCHAIN_FILE} -DCATKIN_DEVEL_PREFIX:PATH=${CATKIN_DEVEL_PREFIX}
+                      -DBUILD_SHARED_LIBS=ON -Dprotobuf_BUILD_TESTS=OFF  -Dprotobuf_BUILD_PROTOC_BINARIES=${BUILD_PROTOC}
+                      ./cmake
+    BUILD_COMMAND cd ../protobuf_src && make -j8
+    INSTALL_COMMAND cd ../protobuf_src && make install -j8 && pwd  
   )
 
   install(DIRECTORY ${CATKIN_DEVEL_PREFIX}/include/google/protobuf
@@ -83,11 +100,27 @@ elseif(USE_SYSTEM_PROTOBUF STREQUAL "OFF")
   install(DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib/
           DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
           FILES_MATCHING PATTERN "libproto*")
-  install(FILES ${CATKIN_DEVEL_PREFIX}/bin/protoc
-          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-          DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION})
-  set(PREFERRED_PROTOC_EXECUTABLE ${CATKIN_DEVEL_PREFIX}/bin/protoc)
+  
+  list(APPEND export_LIBRARIES protobuf protobuf-lite)
+  if (CMAKE_CROSSCOMPILING)
+    if (NOT Protobuf_PROTOC_EXECUTABLE)
+      message(WARNING "We're cross-compiling but '-DProtobuf_PROTOC_EXECUTABLE' is NOT specified! "
+                      "try `which protoc` to find if you have installed protoc. "
+                      "We'll use `/usr/bin/protoc` by default (which is usually the case when we install protoc "
+                      "by `apt-get install protobuf-compiler`). "
+                      "However, if it's not the case, you should run cmake again with "
+                      "'-DProtobuf_PROTOC_EXECUTABLE=/path/to/your/protoc'")
+      set(Protobuf_PROTOC_EXECUTABLE /usr/bin/protoc)
+    endif()
+    set(PREFERRED_PROTOC_EXECUTABLE ${Protobuf_PROTOC_EXECUTABLE})
+  else()
+    install(FILES ${CATKIN_DEVEL_PREFIX}/bin/protoc
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+            DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION})
+    set(PREFERRED_PROTOC_EXECUTABLE ${CATKIN_DEVEL_PREFIX}/bin/protoc)
+    list(APPEND export_LIBRARIES protoc)
+  endif()
   cs_export(INCLUDE_DIRS ${CATKIN_DEVEL_PREFIX}/include
-            LIBRARIES protobuf protobuf-lite protoc
+            LIBRARIES ${export_LIBRARIES}
             CFG_EXTRAS protobuf-generate-cpp.cmake)
 endif()
